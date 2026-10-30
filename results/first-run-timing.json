@@ -1,0 +1,62 @@
+{
+  "measured": "2026-10-30",
+  "operation": "analyze_file on tone-440hz.wav (5 s, 22,050 Hz) in a new Python process",
+  "cold": {
+    "cache": "empty NUMBA_CACHE_DIR",
+    "runs": [
+      {
+        "import_s": 0.32,
+        "first_analysis_s": 30.007,
+        "second_analysis_s": 0.668
+      },
+      {
+        "import_s": 0.183,
+        "first_analysis_s": 20.846,
+        "second_analysis_s": 0.804
+      },
+      {
+        "import_s": 0.233,
+        "first_analysis_s": 37.71,
+        "second_analysis_s": 0.592
+      }
+    ]
+  },
+  "warm": {
+    "cache": "NUMBA_CACHE_DIR filled by the preceding cold run",
+    "runs": [
+      {
+        "import_s": 0.267,
+        "first_analysis_s": 3.833,
+        "second_analysis_s": 0.571
+      },
+      {
+        "import_s": 0.291,
+        "first_analysis_s": 3.829,
+        "second_analysis_s": 0.74
+      },
+      {
+        "import_s": 0.18,
+        "first_analysis_s": 2.23,
+        "second_analysis_s": 0.308
+      }
+    ]
+  },
+  "environment": {
+    "revision": "3044ee8",
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "logical_cpus": 6,
+    "memory_gib": 9.7,
+    "python": "3.12.3",
+    "packages": {
+      "librosa": "1.0.0",
+      "numba": "0.68.1",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1"
+    }
+  },
+  "load_average_1m": {
+    "before": 6.75,
+    "after": 7.33
+  }
+}

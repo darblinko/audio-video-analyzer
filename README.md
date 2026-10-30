@@ -259,7 +259,7 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:5173 and select **Analyze** on a sample clip. The header shows `Gemini: off (no GOOGLE_API_KEY)` and each result shows the skipped Gemini step. If a key is exported in the shell, start the server with `GOOGLE_API_KEY= uv run av-analyzer` to force demo mode. The first analysis on a new install took about 20 s while numba compiled librosa's kernels; a later run in a fresh clone whose test run had already compiled them completed in under 2 s.
+Open http://localhost:5173 and select **Analyze** on a sample clip. The header shows `Gemini: off (no GOOGLE_API_KEY)` and each result shows the skipped Gemini step. If a key is exported in the shell, start the server with `GOOGLE_API_KEY= uv run av-analyzer` to force demo mode. The first analysis in a new process is slow while numba compiles librosa's kernels. Measured on 2026-10-30 with `uv run python scripts/time_first_analysis.py` (one 5 s clip, 3 runs each, WSL2 on x86_64 with 6 logical CPUs, 1-minute load average 6.8 to 7.3 from other processes): 20.8 to 37.7 s with an empty numba cache and 2.2 to 3.8 s once the cache was filled; the record, with package versions, is [results/first-run-timing.json](results/first-run-timing.json).
 
 Video description with Gemini:
 
