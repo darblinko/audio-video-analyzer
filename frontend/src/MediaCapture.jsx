@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { uploadRecording } from './api';
+import { CaptureController } from './capture';
 import { blobToWav } from './wav';
 
 const MIME_CANDIDATES = {
@@ -19,58 +20,54 @@ function videoFileName(mimeType) {
 function MediaCapture({ onUploadComplete, onError }) {
   const [mediaType, setMediaType] = useState('audio');
   const [isRecording, setIsRecording] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [recording, setRecording] = useState(null);
   const [busyMessage, setBusyMessage] = useState(null);
 
-  const recorderRef = useRef(null);
-  const streamRef = useRef(null);
+  const controllerRef = useRef(null);
   const videoRef = useRef(null);
-  const chunksRef = useRef([]);
 
-  const stopStream = () => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+  useEffect(() => {
+    const controller = new CaptureController({
+      getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+      createRecorder: (stream, mimeType) =>
+        new MediaRecorder(stream, mimeType ? { mimeType } : undefined),
+    });
+    controllerRef.current = controller;
+    return () => controller.dispose();
+  }, []);
+
+  const clearPreview = () => {
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  useEffect(() => stopStream, []);
-
   const startRecording = async () => {
+    const type = mediaType;
+    setIsStarting(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: mediaType === 'video' ? { facingMode: 'user' } : false,
-      });
-      streamRef.current = stream;
-      if (mediaType === 'video' && videoRef.current) {
+      const stream = await controllerRef.current.start(
+        { audio: true, video: type === 'video' ? { facingMode: 'user' } : false },
+        pickMimeType(type),
+        (blob, mimeType) => {
+          clearPreview();
+          setIsRecording(false);
+          setRecording({ blob, mediaType: type, mimeType });
+        },
+      );
+      if (!stream) return;
+      if (type === 'video' && videoRef.current) {
         videoRef.current.srcObject = stream;
       }
-      const mimeType = pickMimeType(mediaType);
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
-        setRecording({ blob, mediaType, mimeType: recorder.mimeType });
-        stopStream();
-      };
-      recorder.start();
-      recorderRef.current = recorder;
       setIsRecording(true);
     } catch (error) {
-      stopStream();
+      clearPreview();
       onError(`Microphone or camera unavailable: ${error.message}`);
+    } finally {
+      setIsStarting(false);
     }
   };
 
-  const stopRecording = () => {
-    if (recorderRef.current && isRecording) {
-      recorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
+  const stopRecording = () => controllerRef.current.stop();
 
   const upload = async () => {
     if (!recording) return;
@@ -102,7 +99,7 @@ function MediaCapture({ onUploadComplete, onError }) {
             key={type}
             className={`type-btn ${mediaType === type ? 'active' : ''}`}
             onClick={() => setMediaType(type)}
-            disabled={isRecording || Boolean(busyMessage)}
+            disabled={isRecording || isStarting || Boolean(busyMessage)}
           >
             {type === 'audio' ? 'Audio only' : 'Video and audio'}
           </button>
@@ -117,7 +114,9 @@ function MediaCapture({ onUploadComplete, onError }) {
 
       <div className="recording-controls">
         {!isRecording && !recording && !busyMessage && (
-          <button className="btn btn-primary" onClick={startRecording}>Start recording</button>
+          <button className="btn btn-primary" onClick={startRecording} disabled={isStarting}>
+            {isStarting ? 'Waiting for permission' : 'Start recording'}
+          </button>
         )}
         {isRecording && (
           <button className="btn btn-danger" onClick={stopRecording}>Stop recording</button>
