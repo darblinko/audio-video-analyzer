@@ -110,6 +110,10 @@ function ResultDetails({ result, onClose }) {
 function ResultsPanel({ results, selectedId, onSelect, onRefresh }) {
   const [closedId, setClosedId] = useState(null);
   const selected = results.find((result) => result.id === selectedId && result.id !== closedId);
+  const select = (id) => {
+    setClosedId(null);
+    onSelect(id);
+  };
 
   return (
     <div className="results-panel">
@@ -124,8 +128,17 @@ function ResultsPanel({ results, selectedId, onSelect, onRefresh }) {
           {results.map((result) => (
             <div
               key={result.id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={selected?.id === result.id}
               className={`result-item ${selected?.id === result.id ? 'selected' : ''}`}
-              onClick={() => { setClosedId(null); onSelect(result.id); }}
+              onClick={() => select(result.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  select(result.id);
+                }
+              }}
             >
               <div className="result-header">
                 <h3>{result.filename}</h3>

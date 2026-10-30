@@ -336,6 +336,11 @@
   transform: translateX(5px);
 }
 
+.result-item:focus-visible {
+  outline: 3px solid #667eea;
+  outline-offset: 2px;
+}
+
 .result-item.selected {
   border-color: #667eea;
   background: #f0f4ff;
