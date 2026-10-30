@@ -40,13 +40,15 @@ CHUNK_BYTES = 1024 * 1024
 # Allowance for multipart boundaries, part headers and the media_type field.
 MULTIPART_OVERHEAD_BYTES = 64 * 1024
 UPLOAD_PARTS = {"audio": 1, "video": 1, "media_type": 1}
+SEND_TIMEOUT_S = 5.0
 NO_KEY_NOTICE = "GOOGLE_API_KEY is not set. The Gemini video step was skipped."
 AUDIO_ONLY_NOTICE = "Audio-only run. The Gemini step describes video and runs only for video."
 
 
 class ConnectionManager:
-    def __init__(self) -> None:
+    def __init__(self, send_timeout_s: float = SEND_TIMEOUT_S) -> None:
         self.connections: list[WebSocket] = []
+        self.send_timeout_s = send_timeout_s
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -56,13 +58,16 @@ class ConnectionManager:
         if websocket in self.connections:
             self.connections.remove(websocket)
 
+    async def _send(self, connection: WebSocket, message: dict[str, Any]) -> None:
+        try:
+            await asyncio.wait_for(connection.send_json(message), self.send_timeout_s)
+        except Exception:
+            logger.info("dropping a closed or stalled WebSocket connection")
+            self.disconnect(connection)
+
     async def broadcast(self, message: dict[str, Any]) -> None:
-        for connection in list(self.connections):
-            try:
-                await connection.send_json(message)
-            except Exception:
-                logger.info("dropping a closed WebSocket connection")
-                self.disconnect(connection)
+        """Send to every client at once; a client slower than send_timeout_s is dropped."""
+        await asyncio.gather(*(self._send(c, message) for c in list(self.connections)))
 
 
 @dataclass
