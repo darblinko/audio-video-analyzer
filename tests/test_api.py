@@ -1,7 +1,9 @@
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from av_analyzer import server
 from av_analyzer.server import AUDIO_ONLY_NOTICE, NO_KEY_NOTICE
 
 from .conftest import StubDescriber, wav_bytes
@@ -158,18 +160,42 @@ def test_missing_result_is_404(make_client):
     assert make_client().get("/api/results/does-not-exist").status_code == 404
 
 
-def test_websocket_receives_progress_and_completion(make_client):
+def test_progress_arrives_while_extraction_is_running(make_client, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+    real_analyze = server.analyze_file
+
+    def held_analyze(path, **kwargs):
+        started.set()
+        assert release.wait(10), "the test did not release the extraction"
+        return real_analyze(path, **kwargs)
+
+    monkeypatch.setattr(server, "analyze_file", held_analyze)
     client = make_client()
-    with client.websocket_connect("/ws") as websocket:
-        analysis_id = client.post("/api/samples/tone-440hz/analyze").json()["analysis_id"]
-        messages = [websocket.receive_json() for _ in range(3)]
-    assert [message["type"] for message in messages] == [
-        "progress",
-        "progress",
-        "analysis_complete",
-    ]
-    assert {message["analysis_id"] for message in messages} == {analysis_id}
-    assert messages[1]["message"] == NO_KEY_NOTICE
+    with (
+        client.websocket_connect("/ws") as websocket,
+        ThreadPoolExecutor(max_workers=1) as pool,
+    ):
+        # TestClient.post returns only after background tasks finish, so post from a thread.
+        pending = pool.submit(client.post, "/api/samples/tone-440hz/analyze")
+        try:
+            first = websocket.receive_json()
+            assert started.wait(10)
+            # The event loop still serves requests while the extraction thread is held.
+            assert client.get("/api/health").status_code == 200
+            assert not pending.done()
+        finally:
+            release.set()
+        analysis_id = pending.result(timeout=30).json()["analysis_id"]
+        rest = [websocket.receive_json() for _ in range(2)]
+    assert first == {
+        "type": "progress",
+        "analysis_id": analysis_id,
+        "step": "audio_features",
+        "message": "Extracting audio features",
+    }
+    assert [message["type"] for message in rest] == ["progress", "analysis_complete"]
+    assert {message["analysis_id"] for message in rest} == {analysis_id}
+    assert rest[0]["message"] == NO_KEY_NOTICE
 
 
 def test_uploads_are_deleted_when_the_database_insert_fails(make_client, settings):
