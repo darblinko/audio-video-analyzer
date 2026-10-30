@@ -1,117 +1,140 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import MediaCapture from './MediaCapture';
 import ResultsPanel from './ResultsPanel';
+import SamplePicker from './SamplePicker';
+import { getHealth, getResults, websocketUrl } from './api';
 import './App.css';
+
+const RECONNECT_MS = 3000;
+
+function useAnalysisSocket(onMessage) {
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let socket = null;
+    let timer = null;
+    let stopped = false;
+
+    const connect = () => {
+      socket = new WebSocket(websocketUrl());
+      socket.onopen = () => setConnected(true);
+      socket.onmessage = (event) => onMessage(JSON.parse(event.data));
+      socket.onclose = () => {
+        setConnected(false);
+        if (!stopped) timer = setTimeout(connect, RECONNECT_MS);
+      };
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      if (!socket) return;
+      socket.onmessage = null;
+      socket.onclose = null;
+      if (socket.readyState === WebSocket.CONNECTING) {
+        // Closing a socket that is still connecting logs a browser warning; close it on open.
+        socket.onopen = () => socket.close();
+      } else {
+        socket.close();
+      }
+    };
+  }, [onMessage]);
+
+  return connected;
+}
+
+function GeminiBadge({ gemini }) {
+  if (!gemini) return null;
+  return (
+    <div className={`gemini-badge ${gemini.enabled ? 'on' : 'off'}`}>
+      {gemini.enabled ? `Gemini: ${gemini.model}` : 'Gemini: off (no GOOGLE_API_KEY)'}
+    </div>
+  );
+}
 
 function App() {
   const [results, setResults] = useState([]);
-  const [ws, setWs] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [currentAnalysis, setCurrentAnalysis] = useState(null);
+  const [current, setCurrent] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [gemini, setGemini] = useState(null);
+  const [error, setError] = useState(null);
 
-  // Initialize WebSocket connection
-  useEffect(() => {
-    connectWebSocket();
-    
-    return () => {
-      if (ws) {
-        ws.close();
-      }
-    };
-  }, []);
-
-  const connectWebSocket = () => {
-    const websocket = new WebSocket('ws://localhost:8000/ws');
-    
-    websocket.onopen = () => {
-      console.log('WebSocket connected');
-      setConnectionStatus('connected');
-    };
-    
-    websocket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('WebSocket message:', data);
-      
-      if (data.type === 'analysis_complete') {
-        setCurrentAnalysis(data);
-        fetchResults(); // Refresh results list
-      } else if (data.type === 'progress' || data.type === 'status_update') {
-        setCurrentAnalysis(data);
-      } else if (data.type === 'analysis_error') {
-        setCurrentAnalysis(data);
-        alert(`Analysis failed: ${data.error}`);
-      }
-    };
-    
-    websocket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setConnectionStatus('error');
-    };
-    
-    websocket.onclose = () => {
-      console.log('WebSocket disconnected');
-      setConnectionStatus('disconnected');
-      // Attempt to reconnect after 3 seconds
-      setTimeout(connectWebSocket, 3000);
-    };
-    
-    setWs(websocket);
-  };
-
-  const fetchResults = async () => {
+  const refresh = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/results');
-      const data = await response.json();
-      if (data.success) {
-        setResults(data.results);
-      }
-    } catch (error) {
-      console.error('Failed to fetch results:', error);
+      setResults((await getResults()).results);
+    } catch (err) {
+      setError(`Could not load results: ${err.message}`);
     }
-  };
-
-  useEffect(() => {
-    fetchResults();
   }, []);
 
-  const handleUploadComplete = (analysisId) => {
-    console.log('Upload complete:', analysisId);
-    setCurrentAnalysis({
-      type: 'status_update',
-      analysis_id: analysisId,
-      status: 'processing',
-      message: 'Processing started...'
-    });
-  };
+  const handleMessage = useCallback((message) => {
+    setCurrent(message);
+    if (message.type === 'analysis_complete' || message.type === 'analysis_error') {
+      setSelectedId(message.analysis_id);
+      refresh();
+    }
+  }, [refresh]);
+
+  const connected = useAnalysisSocket(handleMessage);
+
+  useEffect(() => {
+    refresh();
+    getHealth()
+      .then((body) => setGemini(body.gemini))
+      .catch((err) => setError(`API server unreachable: ${err.message}`));
+  }, [refresh]);
+
+  const handleStarted = useCallback((analysisId) => {
+    setError(null);
+    setCurrent({ analysis_id: analysisId, status: 'processing', message: 'Queued' });
+    refresh();
+  }, [refresh]);
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🎙️ Audio/Video Analyzer</h1>
-        <p className="subtitle">Capture, analyze, and understand your media with AI</p>
-        <div className={`connection-status ${connectionStatus}`}>
-          <span className="status-dot"></span>
-          {connectionStatus === 'connected' ? 'Live' : 'Connecting...'}
+        <h1>Audio/Video Analyzer</h1>
+        <p className="subtitle">librosa audio features and optional Gemini video description</p>
+        <div className="header-badges">
+          <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
+            <span className="status-dot"></span>
+            {connected ? 'WebSocket connected' : 'Connecting'}
+          </div>
+          <GeminiBadge gemini={gemini} />
         </div>
       </header>
 
+      {error && (
+        <div className="error-banner" role="alert">
+          <p>{error}</p>
+          <button className="btn-close" onClick={() => setError(null)}>Dismiss</button>
+        </div>
+      )}
+
       <main className="app-main">
         <div className="capture-section">
-          <MediaCapture onUploadComplete={handleUploadComplete} />
-          
-          {currentAnalysis && (
+          <SamplePicker onUploadComplete={handleStarted} onError={setError} />
+          <MediaCapture onUploadComplete={handleStarted} onError={setError} />
+          {current && (
             <div className="current-analysis">
-              <h3>Current Analysis</h3>
+              <h3>Current run</h3>
               <div className="analysis-status">
-                <span className="status-badge">{currentAnalysis.status || 'processing'}</span>
-                <p>{currentAnalysis.message}</p>
+                <span className={`status-badge ${current.status || 'processing'}`}>
+                  {current.status || current.step || 'processing'}
+                </span>
+                <p>{current.message}</p>
               </div>
             </div>
           )}
         </div>
-
         <div className="results-section">
-          <ResultsPanel results={results} onRefresh={fetchResults} />
+          <ResultsPanel
+            results={results}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onRefresh={refresh}
+          />
         </div>
       </main>
     </div>
