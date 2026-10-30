@@ -3,11 +3,13 @@ import MediaCapture from './MediaCapture';
 import ResultsPanel from './ResultsPanel';
 import SamplePicker from './SamplePicker';
 import { getHealth, getResults, websocketUrl } from './api';
+import { hasProcessing, reconcileCurrent } from './reconcile';
 import './App.css';
 
 const RECONNECT_MS = 3000;
+const POLL_MS = 3000;
 
-function useAnalysisSocket(onMessage) {
+function useAnalysisSocket(onMessage, onOpen) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -17,7 +19,11 @@ function useAnalysisSocket(onMessage) {
 
     const connect = () => {
       socket = new WebSocket(websocketUrl());
-      socket.onopen = () => setConnected(true);
+      socket.onopen = () => {
+        setConnected(true);
+        // Events sent while disconnected are lost; reload the stored results instead.
+        onOpen();
+      };
       socket.onmessage = (event) => onMessage(JSON.parse(event.data));
       socket.onclose = () => {
         setConnected(false);
@@ -39,7 +45,7 @@ function useAnalysisSocket(onMessage) {
         socket.close();
       }
     };
-  }, [onMessage]);
+  }, [onMessage, onOpen]);
 
   return connected;
 }
@@ -62,7 +68,9 @@ function App() {
 
   const refresh = useCallback(async () => {
     try {
-      setResults((await getResults()).results);
+      const { results: stored } = await getResults();
+      setResults(stored);
+      setCurrent((previous) => reconcileCurrent(previous, stored));
     } catch (err) {
       setError(`Could not load results: ${err.message}`);
     }
@@ -76,7 +84,13 @@ function App() {
     }
   }, [refresh]);
 
-  const connected = useAnalysisSocket(handleMessage);
+  const connected = useAnalysisSocket(handleMessage, refresh);
+
+  useEffect(() => {
+    if (connected || !hasProcessing(results)) return undefined;
+    const timer = setInterval(refresh, POLL_MS);
+    return () => clearInterval(timer);
+  }, [connected, results, refresh]);
 
   useEffect(() => {
     refresh();
