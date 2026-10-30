@@ -17,6 +17,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -27,6 +28,7 @@ from fastapi.responses import FileResponse
 from av_analyzer.config import Settings
 from av_analyzer.features import AudioDecodeError, analyze_file
 from av_analyzer.gemini import GeminiVideoAnalyzer, VideoDescriber
+from av_analyzer.guards import BodyLimitMiddleware
 from av_analyzer.samples import SAMPLES_DIR, find_sample, load_manifest
 from av_analyzer.storage import Storage
 
@@ -35,6 +37,9 @@ logger = logging.getLogger(__name__)
 AUDIO_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3"}
 VIDEO_SUFFIXES = {".webm", ".mp4", ".mov", ".mkv"}
 CHUNK_BYTES = 1024 * 1024
+# Allowance for multipart boundaries, part headers and the media_type field.
+MULTIPART_OVERHEAD_BYTES = 64 * 1024
+UPLOAD_PARTS = {"audio": 1, "video": 1, "media_type": 1}
 NO_KEY_NOTICE = "GOOGLE_API_KEY is not set. The Gemini video step was skipped."
 AUDIO_ONLY_NOTICE = "Audio-only run. The Gemini step describes video and runs only for video."
 
@@ -87,6 +92,14 @@ def _suffix(upload: UploadFile, allowed: set[str], label: str) -> str:
     if suffix not in allowed:
         raise HTTPException(415, f"{label} must be one of {', '.join(sorted(allowed))}")
     return suffix
+
+
+async def _check_parts(request: Request) -> None:
+    """Reject form parts other than one audio, one video and one media_type."""
+    form = await request.form()
+    for name in set(form.keys()):
+        if len(form.getlist(name)) > UPLOAD_PARTS.get(name, 0):
+            raise HTTPException(422, f"unexpected or repeated form part: {name[:40]}")
 
 
 async def _save_upload(upload: UploadFile, target: Path, budget: int) -> int:
@@ -249,6 +262,11 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+    app.add_middleware(
+        BodyLimitMiddleware,
+        limit=settings.max_upload_bytes + MULTIPART_OVERHEAD_BYTES,
+        paths=["/api/upload"],
+    )
     _register_routes(app, state)
     return app
 
@@ -283,11 +301,13 @@ def _register_routes(app: FastAPI, state: AppState) -> None:
 
     @app.post("/api/upload", status_code=202)
     async def upload(
+        request: Request,
         background: BackgroundTasks,
         audio: Annotated[UploadFile, File()],
         media_type: Annotated[Literal["audio", "video"], Form()] = "audio",
         video: Annotated[UploadFile | None, File()] = None,
     ) -> dict[str, Any]:
+        await _check_parts(request)
         if media_type == "video" and video is None:
             raise HTTPException(422, "media_type video needs a video file part")
         audio_suffix = _suffix(audio, AUDIO_SUFFIXES, "audio")
