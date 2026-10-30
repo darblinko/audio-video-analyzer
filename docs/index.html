@@ -95,7 +95,7 @@ npm run dev</code></pre></li>
         <li>librosa HPSS soft masks give white noise a harmonic share of 50.7% and a percussive share of 50.7%; the shares do not sum to 100%.</li>
         <li>No recorded speech or music was evaluated. Accuracy is measured on one tone and one click track.</li>
         <li>The Gemini step was tested only against a stub. The default model ID <code>gemini-3.5-flash</code> was not checked against Google's model list; <code>GEMINI_MODEL</code> overrides it.</li>
-        <li>The first analysis after a server start takes about 20 s while numba compiles librosa's kernels.</li>
+        <li>The first analysis on a new install took about 20 s while numba compiled librosa's kernels; a later run in a fresh clone whose test run had already compiled them completed in under 2 s.</li>
         <li>Local use only: no authentication, one SQLite file, one process. Exercised in Chromium only.</li>
       </ul>
     </section>
