@@ -143,7 +143,7 @@ Source: chart `rms-over-time` in [docs/data.json](docs/data.json), written by [s
 - The app records the user's microphone, and in video mode the front camera, through the browser's `getUserMedia` API.
 - With `GOOGLE_API_KEY` set, each video recording is uploaded to the Google Gemini Files API for description, and the adapter deletes the remote file when the request ends ([gemini.py](src/av_analyzer/gemini.py)). Google's terms for the Gemini API apply to that upload. Without a key, nothing leaves the machine.
 - Uploaded files are written to `data/uploads/` and deleted when the run ends, unless `AVA_KEEP_UPLOADS=1`. Feature results are stored in `data/analyzer.db`. Both paths are gitignored.
-- The server binds to 127.0.0.1 by default and has no authentication.
+- The server binds to 127.0.0.1 by default and has no authentication. POST requests and WebSocket handshakes that carry an `Origin` header outside `AVA_CORS_ORIGINS` are refused with 403, so a web page on another origin cannot start runs or read progress.
 
 ## What it does
 

@@ -46,3 +46,38 @@ class BodyLimitMiddleware:
 async def _too_large(scope: Scope, receive: Receive, send: Send) -> None:
     response = PlainTextResponse("request body exceeds AVA_MAX_UPLOAD_MB", status_code=413)
     await response(scope, receive, send)
+
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class OriginGuardMiddleware:
+    """Refuse state-changing requests and WebSocket handshakes from origins not in `allowed`.
+
+    CORS only stops a browser from reading a response; the request itself still runs. Requests
+    without an Origin header (curl, scripts) are not sent by a browser page and pass.
+    """
+
+    def __init__(self, app: ASGIApp, allowed: Iterable[str]) -> None:
+        self.app = app
+        self.allowed = frozenset(allowed)
+
+    def _trusted(self, scope: Scope) -> bool:
+        origin = dict(scope["headers"]).get(b"origin")
+        return origin is None or origin.decode("latin-1") in self.allowed
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "websocket" and not self._trusted(scope):
+            await receive()  # the websocket.connect message
+            # Closing before accept makes the server answer the handshake with 403.
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        if (
+            scope["type"] == "http"
+            and scope["method"] not in SAFE_METHODS
+            and not self._trusted(scope)
+        ):
+            response = PlainTextResponse("origin not allowed", status_code=403)
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)

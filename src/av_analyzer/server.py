@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse
 from av_analyzer.config import Settings
 from av_analyzer.features import AudioDecodeError, analyze_file
 from av_analyzer.gemini import GeminiVideoAnalyzer, VideoDescriber
-from av_analyzer.guards import BodyLimitMiddleware
+from av_analyzer.guards import BodyLimitMiddleware, OriginGuardMiddleware
 from av_analyzer.samples import SAMPLES_DIR, find_sample, load_manifest
 from av_analyzer.storage import Storage
 
@@ -275,6 +275,8 @@ def create_app(
         limit=settings.max_upload_bytes + MULTIPART_OVERHEAD_BYTES,
         paths=["/api/upload"],
     )
+    # Added last, so it runs first: untrusted origins are refused before any other work.
+    app.add_middleware(OriginGuardMiddleware, allowed=settings.cors_origins)
     _register_routes(app, state)
     return app
 
