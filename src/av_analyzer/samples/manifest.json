@@ -1,0 +1,47 @@
+{
+  "seed": 20261030,
+  "sample_rate": 22050,
+  "duration_s": 5.0,
+  "generator": "scripts/make_samples.py",
+  "samples": [
+    {
+      "id": "tone-440hz",
+      "title": "Sine tone, 440 Hz",
+      "description": "Pure 440 Hz sine at amplitude 0.3.",
+      "expected": {
+        "frequency_hz": 440.0
+      },
+      "file": "tone-440hz.wav"
+    },
+    {
+      "id": "chord-a-major",
+      "title": "A major chord",
+      "description": "220, 277.18 and 329.63 Hz with two overtones each and a 0.4 Hz swell.",
+      "expected": {},
+      "file": "chord-a-major.wav"
+    },
+    {
+      "id": "click-track-120bpm",
+      "title": "Click track, 120 BPM",
+      "description": "30 ms decaying 2 kHz clicks with noise, one every 0.5 s.",
+      "expected": {
+        "tempo_bpm": 120.0
+      },
+      "file": "click-track-120bpm.wav"
+    },
+    {
+      "id": "white-noise",
+      "title": "White noise",
+      "description": "Gaussian white noise, standard deviation 0.1.",
+      "expected": {},
+      "file": "white-noise.wav"
+    },
+    {
+      "id": "speech-like",
+      "title": "Speech-like synthetic signal",
+      "description": "Harmonics of a 95 to 145 Hz pitch shaped by /a/, /i/ and /u/ formants, syllable envelopes, noise bursts and pauses. Not a recording.",
+      "expected": {},
+      "file": "speech-like.wav"
+    }
+  ]
+}
