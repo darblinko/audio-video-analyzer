@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>audio-video-analyzer</title>
+  <meta name="description" content="Browser recording, librosa audio features and optional Gemini video description, served by FastAPI with a React client.">
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;600&display=swap">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <header class="site-bar">
+    <a href="https://darblinko.github.io/">Mitchell Foutz</a>
+    <a href="https://github.com/darblinko/audio-video-analyzer">Source on GitHub</a>
+  </header>
+
+  <main>
+    <section class="intro">
+      <h1>audio-video-analyzer</h1>
+      <p class="lede">Records audio or video in the browser, extracts spectral, temporal and energy features with librosa, and, when a Gemini API key is set, asks a Gemini model to describe the video with those features as context. Five bundled synthetic clips run the full flow with no key, microphone or camera.</p>
+      <dl class="record">
+        <div><dt>Repository</dt><dd>darblinko/audio-video-analyzer</dd></div>
+        <div><dt>Revision</dt><dd><code>6e3ab56</code></dd></div>
+        <div><dt>Measured</dt><dd>2026-10-30</dd></div>
+        <div><dt>License</dt><dd>Apache-2.0</dd></div>
+      </dl>
+    </section>
+
+    <section>
+      <h2>Problem</h2>
+      <p>A short recording carries two kinds of information: signal properties that can be computed deterministically (pitch content, tempo, energy over time) and visual content that needs a vision model. This project computes the first locally and passes it to the second as context, so the model description and the measured features appear in one result.</p>
+      <p>The earlier version of the code converted every recording to MP3 in the browser and uploaded only the audio, so the video description step was never reached. This version uploads the original video next to a browser-encoded WAV.</p>
+      <aside class="note">
+        <p>Privacy: the app records the microphone and, in video mode, the camera. With <code>GOOGLE_API_KEY</code> set, video recordings are uploaded to the Gemini Files API. Without a key, nothing leaves the machine.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <p>The browser decodes each recording with the Web Audio API and encodes 16-bit mono WAV, so the server needs no ffmpeg. FastAPI runs the analysis as a background task with librosa and the Gemini client in worker threads, stores the result in SQLite and pushes progress to the React client over WebSocket.</p>
+      <pre class="mermaid">
+flowchart LR
+  rec["Browser recording"] --> wav["WAV encode in browser"]
+  wav --> api["FastAPI upload"]
+  rec -- "video mode" --> api
+  samples["Bundled sample clips"] --> api
+  api --> feat["librosa features"]
+  feat --> key{"Key set and video?"}
+  key -- yes --> gem["Gemini Files API and generate_content"]
+  key -- no --> skip["Step recorded as skipped"]
+  gem --> db[("SQLite")]
+  skip --> db
+  db --> ws["WebSocket to React UI"]
+      </pre>
+    </section>
+
+    <section>
+      <h2>Measured results</h2>
+      <p>Features computed on the five bundled clips: a 440 Hz sine, an A major chord, a 120 BPM click track, white noise and a speech-like signal built from harmonics shaped by vowel formants. Each clip is 5 s at 22,050 Hz, generated with seed 20261030. Only the tone and the click track have a generated reference value.</p>
+      <figure class="chart" data-chart="known-values"></figure>
+      <figure class="chart" data-chart="centroid-by-clip"></figure>
+      <figure class="chart" data-chart="harmonic-share"></figure>
+      <figure class="chart" data-chart="rms-over-time"></figure>
+      <aside class="note">
+        <p>Source: <code>results/sample-features.json</code> at <code>6e3ab56</code>. Reproduce: <code>uv run python scripts/export_landing.py</code></p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>Run it</h2>
+      <p>Demo mode needs Python 3.12 with uv and Node.js 20.19 or later. It needs no API key, microphone or camera.</p>
+      <ol class="steps">
+        <li><pre><code>git clone https://github.com/darblinko/audio-video-analyzer
+cd audio-video-analyzer</code></pre></li>
+        <li><pre><code>uv sync
+uv run av-analyzer</code></pre></li>
+        <li><pre><code>cd frontend
+npm ci
+npm run dev</code></pre></li>
+        <li>Open <code>http://localhost:5173</code> and select Analyze on a sample clip.</li>
+        <li>For video description, copy <code>.env.example</code> to <code>.env</code>, set <code>GOOGLE_API_KEY</code> and restart the server.</li>
+      </ol>
+      <aside class="note">
+        <p>Tests: <code>uv run pytest -q</code> runs 49 offline tests with a stub in place of Gemini.</p>
+      </aside>
+    </section>
+
+    <section>
+      <h2>Limitations</h2>
+      <ul>
+        <li>The clip tags are fixed-threshold heuristics. On the sample clips the click track is tagged speech_or_noise and low_energy, the tone and chord are tagged slow_tempo with 0 BPM, and white noise is assigned 152.0 BPM and tagged fast_tempo.</li>
+        <li>librosa HPSS soft masks give white noise a harmonic share of 50.7% and a percussive share of 50.7%; the shares do not sum to 100%.</li>
+        <li>No recorded speech or music was evaluated. Accuracy is measured on one tone and one click track.</li>
+        <li>The Gemini step was tested only against a stub. The default model ID <code>gemini-3.5-flash</code> was not checked against Google's model list; <code>GEMINI_MODEL</code> overrides it.</li>
+        <li>The first analysis after a server start takes about 20 s while numba compiles librosa's kernels.</li>
+        <li>Local use only: no authentication, one SQLite file, one process. Exercised in Chromium only.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    audio-video-analyzer. Apache-2.0. Figures generated from <code>docs/data.json</code> at <code>6e3ab56</code>.
+  </footer>
+
+  <script src="charts.js" defer></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs";
+    const dark = document.documentElement.dataset.theme === "dark" ||
+      (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+    mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral",
+      fontFamily: "IBM Plex Sans, system-ui, sans-serif", securityLevel: "strict" });
+  </script>
+</body>
+</html>
