@@ -5,9 +5,13 @@ import logging
 import os
 
 import uvicorn
+from dotenv import load_dotenv
 
 
 def main() -> None:
+    # Load .env before reading AVA_HOST and AVA_PORT. Variables already set in the environment
+    # are not overridden, and command-line flags override both.
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Run the audio/video analyzer API server.")
     parser.add_argument("--host", default=os.getenv("AVA_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("AVA_PORT", "8000")))
