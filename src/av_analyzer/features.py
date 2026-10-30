@@ -1,219 +1,135 @@
-"""
-Audio DSP processor using librosa for feature extraction and analysis
-"""
+"""Clip-level audio features and frame series computed with librosa."""
+
+from itertools import pairwise
+from pathlib import Path
+from typing import Any
+
 import librosa
 import numpy as np
-import soundfile as sf
-from typing import Dict, Any
-import os
+
+SAMPLE_RATE = 22050
+SERIES_POINTS = 120
+_EPS = 1e-10
 
 
-class AudioProcessor:
-    """Process audio files and extract DSP features"""
-    
-    def __init__(self, sample_rate: int = 22050):
-        self.sample_rate = sample_rate
-    
-    def analyze_audio(self, audio_path: str) -> Dict[str, Any]:
-        """
-        Perform comprehensive audio analysis
-        
-        Args:
-            audio_path: Path to audio file
-            
-        Returns:
-            Dictionary containing audio features and metrics
-        """
-        try:
-            # Load audio file
-            y, sr = librosa.load(audio_path, sr=self.sample_rate)
-            
-            # Basic properties
-            duration = librosa.get_duration(y=y, sr=sr)
-            
-            # Spectral features
-            spectral_centroids = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-            spectral_rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
-            spectral_bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
-            
-            # Zero crossing rate (useful for voiced/unvoiced detection)
-            zcr = librosa.feature.zero_crossing_rate(y)[0]
-            
-            # MFCCs (Mel-frequency cepstral coefficients)
-            mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
-            
-            # Tempo and beat tracking
-            tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-            
-            # RMS Energy
-            rms = librosa.feature.rms(y=y)[0]
-            
-            # Chroma features (pitch class)
-            chroma = librosa.feature.chroma_stft(y=y, sr=sr)
-            
-            # Harmonic and percussive components
-            y_harmonic, y_percussive = librosa.effects.hpss(y)
-            
-            # Aggregate statistics
-            results = {
-                "basic_info": {
-                    "duration_seconds": float(duration),
-                    "sample_rate": int(sr),
-                    "total_samples": len(y),
-                    "channels": 1  # librosa loads as mono
-                },
-                "spectral_features": {
-                    "centroid_mean": float(np.mean(spectral_centroids)),
-                    "centroid_std": float(np.std(spectral_centroids)),
-                    "rolloff_mean": float(np.mean(spectral_rolloff)),
-                    "bandwidth_mean": float(np.mean(spectral_bandwidth)),
-                    "bandwidth_std": float(np.std(spectral_bandwidth))
-                },
-                "temporal_features": {
-                    "zero_crossing_rate_mean": float(np.mean(zcr)),
-                    "zero_crossing_rate_std": float(np.std(zcr)),
-                    "tempo_bpm": float(tempo),
-                    "beat_count": len(beats)
-                },
-                "energy_features": {
-                    "rms_mean": float(np.mean(rms)),
-                    "rms_std": float(np.std(rms)),
-                    "rms_max": float(np.max(rms)),
-                    "dynamic_range_db": float(20 * np.log10(np.max(rms) / (np.mean(rms) + 1e-10)))
-                },
-                "mfcc_features": {
-                    f"mfcc_{i}_mean": float(np.mean(mfccs[i]))
-                    for i in range(min(5, len(mfccs)))  # First 5 MFCCs
-                },
-                "harmonic_percussive": {
-                    "harmonic_ratio": float(np.sum(np.abs(y_harmonic)) / (np.sum(np.abs(y)) + 1e-10)),
-                    "percussive_ratio": float(np.sum(np.abs(y_percussive)) / (np.sum(np.abs(y)) + 1e-10))
-                },
-                "chroma_features": {
-                    "chroma_mean": float(np.mean(chroma)),
-                    "chroma_std": float(np.std(chroma))
-                }
-            }
-            
-            # Classify audio type based on features
-            results["classification"] = self._classify_audio(results)
-            
-            return {
-                "success": True,
-                "features": results,
-                "message": "Audio analysis completed successfully"
-            }
-            
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "message": "Failed to analyze audio"
-            }
-    
-    def _classify_audio(self, features: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Simple classification based on extracted features
-        
-        Args:
-            features: Extracted audio features
-            
-        Returns:
-            Classification results
-        """
-        classifications = []
-        
-        # Check if predominantly harmonic (music) or percussive (speech/noise)
-        harmonic_ratio = features["harmonic_percussive"]["harmonic_ratio"]
-        if harmonic_ratio > 0.6:
-            classifications.append("musical")
-        elif harmonic_ratio < 0.4:
-            classifications.append("speech_or_noise")
-        else:
-            classifications.append("mixed")
-        
-        # Energy level classification
-        rms_mean = features["energy_features"]["rms_mean"]
-        if rms_mean > 0.1:
-            classifications.append("high_energy")
-        elif rms_mean > 0.05:
-            classifications.append("medium_energy")
-        else:
-            classifications.append("low_energy")
-        
-        # Tempo classification
-        tempo = features["temporal_features"]["tempo_bpm"]
-        if tempo > 120:
-            classifications.append("fast_tempo")
-        elif tempo > 80:
-            classifications.append("moderate_tempo")
-        else:
-            classifications.append("slow_tempo")
-        
-        return {
-            "type": classifications[0] if classifications else "unknown",
-            "energy_level": classifications[1] if len(classifications) > 1 else "unknown",
-            "tempo_category": classifications[2] if len(classifications) > 2 else "unknown",
-            "all_tags": ", ".join(classifications)
-        }
-    
-    def extract_audio_from_video(self, video_path: str, output_path: str) -> Dict[str, Any]:
-        """
-        Extract audio from video file (requires ffmpeg installed)
-        Note: For local demo, we rely on client-side extraction with FFmpeg.wasm
-        This is a fallback server-side option.
-        
-        Args:
-            video_path: Path to video file
-            output_path: Path for extracted audio
-            
-        Returns:
-            Status dictionary
-        """
-        try:
-            import subprocess
-            
-            # Use ffmpeg to extract audio
-            command = [
-                'ffmpeg',
-                '-i', video_path,
-                '-vn',  # No video
-                '-acodec', 'pcm_s16le',  # Convert to WAV
-                '-ar', '44100',  # Sample rate
-                '-ac', '2',  # Stereo
-                output_path,
-                '-y'  # Overwrite
-            ]
-            
-            result = subprocess.run(command, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                return {
-                    "success": True,
-                    "output_path": output_path,
-                    "message": "Audio extracted successfully"
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": result.stderr,
-                    "message": "Failed to extract audio from video"
-                }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "message": "Audio extraction failed"
-            }
+class AudioDecodeError(ValueError):
+    """The file could not be decoded as audio."""
 
 
-if __name__ == "__main__":
-    # Test the processor
-    processor = AudioProcessor()
-    
-    # This is just for testing - you'd need a real audio file
-    print("AudioProcessor module loaded successfully")
-    print("Available methods:")
-    print("  - analyze_audio(audio_path)")
-    print("  - extract_audio_from_video(video_path, output_path)")
+def load_audio(path: str | Path, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+    """Decode a file to mono float32 at sample_rate. WAV, FLAC and OGG need no ffmpeg."""
+    try:
+        samples, _ = librosa.load(str(path), sr=sample_rate, mono=True)
+    except Exception as exc:
+        raise AudioDecodeError(f"cannot decode {Path(path).name}") from exc
+    if samples.size == 0:
+        raise AudioDecodeError(f"{Path(path).name} contains no samples")
+    return samples
+
+
+def analyze_file(path: str | Path, sample_rate: int = SAMPLE_RATE) -> dict[str, Any]:
+    return extract_features(load_audio(path, sample_rate), sample_rate)
+
+
+def _downsample(values: np.ndarray, points: int) -> list[float]:
+    if values.size <= points:
+        return [round(float(v), 6) for v in values]
+    edges = np.linspace(0, values.size, points + 1).astype(int)
+    return [round(float(values[a:b].mean()), 6) for a, b in pairwise(edges)]
+
+
+def _series(rms: np.ndarray, centroid: np.ndarray, sample_rate: int) -> dict[str, list[float]]:
+    times = librosa.frames_to_time(np.arange(rms.size), sr=sample_rate)
+    return {
+        "time_s": _downsample(times, SERIES_POINTS),
+        "rms": _downsample(rms, SERIES_POINTS),
+        "centroid_hz": _downsample(centroid, SERIES_POINTS),
+    }
+
+
+def extract_features(samples: np.ndarray, sample_rate: int) -> dict[str, Any]:
+    centroid = librosa.feature.spectral_centroid(y=samples, sr=sample_rate)[0]
+    rolloff = librosa.feature.spectral_rolloff(y=samples, sr=sample_rate)[0]
+    bandwidth = librosa.feature.spectral_bandwidth(y=samples, sr=sample_rate)[0]
+    zcr = librosa.feature.zero_crossing_rate(samples)[0]
+    mfccs = librosa.feature.mfcc(y=samples, sr=sample_rate, n_mfcc=13)
+    tempo, beats = librosa.beat.beat_track(y=samples, sr=sample_rate)
+    rms = librosa.feature.rms(y=samples)[0]
+    chroma = librosa.feature.chroma_stft(y=samples, sr=sample_rate)
+    harmonic, percussive = librosa.effects.hpss(samples)
+    total_abs = float(np.sum(np.abs(samples))) + _EPS
+
+    features: dict[str, Any] = {
+        "basic_info": {
+            "duration_seconds": float(samples.size / sample_rate),
+            "sample_rate": int(sample_rate),
+            "total_samples": int(samples.size),
+            "channels": 1,
+        },
+        "spectral_features": {
+            "centroid_mean": float(np.mean(centroid)),
+            "centroid_std": float(np.std(centroid)),
+            "rolloff_mean": float(np.mean(rolloff)),
+            "bandwidth_mean": float(np.mean(bandwidth)),
+            "bandwidth_std": float(np.std(bandwidth)),
+        },
+        "temporal_features": {
+            "zero_crossing_rate_mean": float(np.mean(zcr)),
+            "zero_crossing_rate_std": float(np.std(zcr)),
+            "tempo_bpm": float(np.atleast_1d(tempo)[0]),
+            "beat_count": len(beats),
+        },
+        "energy_features": {
+            "rms_mean": float(np.mean(rms)),
+            "rms_std": float(np.std(rms)),
+            "rms_max": float(np.max(rms)),
+            "dynamic_range_db": float(20 * np.log10(np.max(rms) / (np.mean(rms) + _EPS) + _EPS)),
+        },
+        "mfcc_features": {f"mfcc_{i}_mean": float(np.mean(mfccs[i])) for i in range(5)},
+        "harmonic_percussive": {
+            "harmonic_ratio": float(np.sum(np.abs(harmonic)) / total_abs),
+            "percussive_ratio": float(np.sum(np.abs(percussive)) / total_abs),
+        },
+        "chroma_features": {
+            "chroma_mean": float(np.mean(chroma)),
+            "chroma_std": float(np.std(chroma)),
+        },
+        "series": _series(rms, centroid, sample_rate),
+    }
+    features["classification"] = classify(features)
+    return features
+
+
+def classify(features: dict[str, Any]) -> dict[str, str]:
+    """Fixed-threshold tags. These are heuristics, not a trained classifier."""
+    harmonic_ratio = features["harmonic_percussive"]["harmonic_ratio"]
+    rms_mean = features["energy_features"]["rms_mean"]
+    tempo = features["temporal_features"]["tempo_bpm"]
+
+    if harmonic_ratio > 0.6:
+        audio_type = "musical"
+    elif harmonic_ratio < 0.4:
+        audio_type = "speech_or_noise"
+    else:
+        audio_type = "mixed"
+
+    if rms_mean > 0.1:
+        energy = "high_energy"
+    elif rms_mean > 0.05:
+        energy = "medium_energy"
+    else:
+        energy = "low_energy"
+
+    if tempo > 120:
+        tempo_category = "fast_tempo"
+    elif tempo > 80:
+        tempo_category = "moderate_tempo"
+    else:
+        tempo_category = "slow_tempo"
+
+    return {
+        "type": audio_type,
+        "energy_level": energy,
+        "tempo_category": tempo_category,
+        "all_tags": ", ".join([audio_type, energy, tempo_category]),
+    }
