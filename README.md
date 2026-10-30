@@ -150,7 +150,7 @@ Source: chart `rms-over-time` in [docs/data.json](docs/data.json), written by [s
 - Captures audio, or video with audio, with `MediaRecorder`; decodes the recording with the Web Audio API and encodes 16-bit mono WAV in the browser ([wav.js](frontend/src/wav.js)), so the server needs no ffmpeg.
 - Computes spectral centroid, rolloff and bandwidth, zero-crossing rate, tempo and beat count, RMS energy, 13 MFCCs (means of the first 5 are stored), chroma and the harmonic and percussive share from librosa HPSS ([features.py](src/av_analyzer/features.py)). RMS and centroid are also returned as 120-point series for the UI sparklines.
 - Tags each clip with three fixed-threshold heuristics (harmonic share, RMS level, tempo). These are not a trained classifier.
-- For video runs with a key set, uploads the original recording to the Gemini Files API, waits for processing with a timeout, and asks the model configured in `GEMINI_MODEL` for a description that takes the audio tags as context.
+- For video runs with a key set, uploads the original recording to the Gemini Files API, waits for processing, and asks the model configured in `GEMINI_MODEL` for a description that takes the audio tags as context. Each HTTP request to Gemini times out after `GEMINI_TIMEOUT_S` (default 120) with at most 3 attempts, and the whole step is recorded as `failed` when it exceeds `GEMINI_TIMEOUT_S`.
 - Ships five synthetic sample clips generated with a fixed seed, so the full flow runs with no microphone, camera or API key.
 - Runs 49 offline tests: feature values on the sample clips, every API route through FastAPI `TestClient` with a stub in place of Gemini, the Gemini adapter against a fake client, and storage.
 

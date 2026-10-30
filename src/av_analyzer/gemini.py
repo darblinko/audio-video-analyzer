@@ -10,6 +10,7 @@ from typing import Any, Protocol
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_S = 2.0
+REQUEST_ATTEMPTS = 3
 
 
 class VideoDescriber(Protocol):
@@ -64,8 +65,17 @@ class GeminiVideoAnalyzer:
             raise ValueError("GOOGLE_API_KEY is not set")
         if client is None:
             from google import genai
+            from google.genai import types
 
-            client = genai.Client(api_key=api_key)
+            # Every HTTP request (upload, poll, generate, delete) is bounded by timeout_s and
+            # retried at most twice; the server also applies timeout_s to the whole step.
+            client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(
+                    timeout=int(timeout_s * 1000),
+                    retry_options=types.HttpRetryOptions(attempts=REQUEST_ATTEMPTS),
+                ),
+            )
         self.client = client
         self.model = model
         self.timeout_s = timeout_s

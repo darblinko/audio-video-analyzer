@@ -126,6 +126,10 @@ async def _save_upload(upload: UploadFile, target: Path, budget: int) -> int:
     return written
 
 
+def _gemini_failure(model: str, detail: str, video_info: dict[str, Any]) -> dict[str, Any]:
+    return {"status": "failed", "detail": detail, "model": model, "video_info": video_info}
+
+
 async def _gemini_step(
     state: AppState,
     analysis_id: str,
@@ -162,16 +166,21 @@ async def _gemini_step(
         "file_size_mb": round(video_path.stat().st_size / 1024 / 1024, 3),
         "suffix": video_path.suffix,
     }
+    timeout_s = state.settings.gemini_timeout_s
     try:
-        text = await asyncio.to_thread(state.describer.describe, video_path, features)
+        # The worker thread cannot be cancelled; on timeout it finishes in the background and
+        # still deletes the remote file, while this run completes and removes the local upload.
+        text = await asyncio.wait_for(
+            asyncio.to_thread(state.describer.describe, video_path, features), timeout_s
+        )
+    except TimeoutError:
+        logger.warning("Gemini step exceeded %.0f s for %s", timeout_s, analysis_id)
+        detail = f"Gemini step exceeded GEMINI_TIMEOUT_S ({timeout_s:.0f} s)"
+        return _gemini_failure(state.describer.model, detail, video_info)
     except Exception as exc:
         logger.exception("Gemini step failed for %s", analysis_id)
-        return {
-            "status": "failed",
-            "detail": f"Gemini step failed ({type(exc).__name__})",
-            "model": state.describer.model,
-            "video_info": video_info,
-        }
+        detail = f"Gemini step failed ({type(exc).__name__})"
+        return _gemini_failure(state.describer.model, detail, video_info)
     return {
         "status": "completed",
         "analysis": text,

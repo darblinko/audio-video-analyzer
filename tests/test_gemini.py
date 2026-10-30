@@ -109,3 +109,19 @@ def test_prompt_carries_the_audio_context():
 
 def test_prompt_tolerates_missing_features():
     assert "Duration: unknown" in build_prompt({})
+
+
+def test_the_sdk_client_gets_a_request_timeout_and_bounded_retries(monkeypatch):
+    from google import genai
+
+    captured = {}
+
+    def fake_client(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(genai, "Client", fake_client)
+    GeminiVideoAnalyzer("key", "test-model", timeout_s=30.0)
+    options = captured["http_options"]
+    assert options.timeout == 30_000
+    assert options.retry_options.attempts == 3

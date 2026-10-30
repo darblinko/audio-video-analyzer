@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 
 from av_analyzer.server import AUDIO_ONLY_NOTICE, NO_KEY_NOTICE
@@ -179,4 +181,24 @@ def test_uploads_are_deleted_when_the_database_insert_fails(make_client, setting
     client.app.state.av.storage.create = locked
     with pytest.raises(RuntimeError, match="database is locked"):
         _upload(client)
+    assert list(settings.upload_dir.iterdir()) == []
+
+
+def test_a_stalled_gemini_step_fails_at_the_overall_deadline(make_client, settings):
+    release = threading.Event()
+
+    class StalledDescriber(StubDescriber):
+        def describe(self, video_path, audio_summary):
+            release.wait(10)
+            return "late"
+
+    client = make_client(StalledDescriber(), gemini_timeout_s=0.2)
+    try:
+        analysis_id = _upload(client, media_type="video", with_video=True).json()["analysis_id"]
+        result = client.get(f"/api/results/{analysis_id}").json()["result"]
+    finally:
+        release.set()
+    assert result["status"] == "completed"
+    assert result["video_analysis"]["status"] == "failed"
+    assert "GEMINI_TIMEOUT_S" in result["video_analysis"]["detail"]
     assert list(settings.upload_dir.iterdir()) == []
