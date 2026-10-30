@@ -66,6 +66,7 @@ def _environment() -> dict:
 
 
 def main() -> None:
+    load_before = os.getloadavg()[0]
     cold, warm = [], []
     for _ in range(RUNS):
         with tempfile.TemporaryDirectory(prefix="numba-cache-") as cache_dir:
@@ -77,6 +78,8 @@ def main() -> None:
         "cold": {"cache": "empty NUMBA_CACHE_DIR", "runs": cold},
         "warm": {"cache": "NUMBA_CACHE_DIR filled by the preceding cold run", "runs": warm},
         "environment": _environment(),
+        # Other processes change these timings; the load average shows how busy the machine was.
+        "load_average_1m": {"before": round(load_before, 2), "after": round(os.getloadavg()[0], 2)},
     }
     OUTPUT.parent.mkdir(exist_ok=True)
     OUTPUT.write_text(json.dumps(record, indent=2) + "\n")
