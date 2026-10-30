@@ -152,7 +152,7 @@ Source: chart `rms-over-time` in [docs/data.json](docs/data.json), written by [s
 - Tags each clip with three fixed-threshold heuristics (harmonic share, RMS level, tempo). These are not a trained classifier.
 - For video runs with a key set, uploads the original recording to the Gemini Files API, waits for processing, and asks the model configured in `GEMINI_MODEL` for a description that takes the audio tags as context. Each HTTP request to Gemini times out after `GEMINI_TIMEOUT_S` (default 120) with at most 3 attempts, and the whole step is recorded as `failed` when it exceeds `GEMINI_TIMEOUT_S`.
 - Ships five synthetic sample clips generated with a fixed seed, so the full flow runs with no microphone, camera or API key.
-- Runs 49 offline tests: feature values on the sample clips, every API route through FastAPI `TestClient` with a stub in place of Gemini, the Gemini adapter against a fake client, and storage.
+- Runs 69 offline pytest tests: feature values on the sample clips, every API route through FastAPI `TestClient` with a stub in place of Gemini, request size, duration, concurrency and origin limits, the Gemini adapter against a fake client, the CLI and storage. `npm test` runs 17 `node:test` tests of the WAV encoder, the upload form, the capture controller and result reconciliation; capture through `MediaRecorder` in a browser has no automated test.
 
 ## How it works
 
@@ -284,7 +284,7 @@ uvx ruff check . && uvx ruff format --check .
 cd frontend && npm ci && npm test && npm run build
 ```
 
-Configuration is read from environment variables or `.env`; [.env.example](.env.example) lists all of them.
+Configuration is read from environment variables or `.env`; [.env.example](.env.example) is the template. Two limits are not in the template: `AVA_MAX_AUDIO_SECONDS` (default 300) rejects longer clips before they are decoded, and `AVA_MAX_CONCURRENT_ANALYSES` (default 2) caps how many feature extractions run at once. [config.py](src/av_analyzer/config.py) defines every setting.
 
 ## Project layout
 
