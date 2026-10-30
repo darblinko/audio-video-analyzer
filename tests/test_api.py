@@ -1,3 +1,5 @@
+import pytest
+
 from av_analyzer.server import AUDIO_ONLY_NOTICE, NO_KEY_NOTICE
 
 from .conftest import StubDescriber, wav_bytes
@@ -166,3 +168,15 @@ def test_websocket_receives_progress_and_completion(make_client):
     ]
     assert {message["analysis_id"] for message in messages} == {analysis_id}
     assert messages[1]["message"] == NO_KEY_NOTICE
+
+
+def test_uploads_are_deleted_when_the_database_insert_fails(make_client, settings):
+    client = make_client()
+
+    async def locked(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+
+    client.app.state.av.storage.create = locked
+    with pytest.raises(RuntimeError, match="database is locked"):
+        _upload(client)
+    assert list(settings.upload_dir.iterdir()) == []

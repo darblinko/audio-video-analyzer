@@ -333,23 +333,24 @@ def _register_routes(app: FastAPI, state: AppState) -> None:
             if video is not None and media_type == "video":
                 video_path = run_dir / f"video{video_suffix}"
                 await _save_upload(video, video_path, budget)
+            primary = video if video_path is not None else audio
+            filename = _display_name(primary.filename, f"recording{video_suffix or audio_suffix}")
+            await state.storage.create(analysis_id, filename, media_type, _now())
+            await state.manager.broadcast(
+                {
+                    "type": "status_update",
+                    "analysis_id": analysis_id,
+                    "status": "processing",
+                    "message": "Upload received",
+                }
+            )
+            # From here run_analysis owns run_dir and deletes it when the run ends.
+            background.add_task(
+                run_analysis, state, analysis_id, media_type, audio_path, video_path, run_dir
+            )
         except BaseException:
             shutil.rmtree(run_dir, ignore_errors=True)
             raise
-        primary = video if video_path is not None else audio
-        filename = _display_name(primary.filename, f"recording{video_suffix or audio_suffix}")
-        await state.storage.create(analysis_id, filename, media_type, _now())
-        await state.manager.broadcast(
-            {
-                "type": "status_update",
-                "analysis_id": analysis_id,
-                "status": "processing",
-                "message": "Upload received",
-            }
-        )
-        background.add_task(
-            run_analysis, state, analysis_id, media_type, audio_path, video_path, run_dir
-        )
         return {"analysis_id": analysis_id, "status": "processing"}
 
     @app.get("/api/results")
