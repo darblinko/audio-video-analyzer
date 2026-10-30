@@ -242,7 +242,7 @@ Source: `results/sample-features.json (scripts/export_landing.py)`
 
 ## Quickstart
 
-Requirements: Python 3.12 with [uv](https://docs.astral.sh/uv/), Node.js 20.19 or later. No ffmpeg is needed.
+Requirements: Python 3.12 with [uv](https://docs.astral.sh/uv/), Node.js `^20.19.0 || >=22.12.0` (the range Vite 7.3 and @vitejs/plugin-react 5.2 declare; [frontend/.nvmrc](frontend/.nvmrc) selects Node 22). No ffmpeg is needed.
 
 Demo mode, with no API key, microphone or camera. Terminal 1, from the repository root:
 
