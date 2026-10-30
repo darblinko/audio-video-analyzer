@@ -273,7 +273,7 @@ Tests, lint and the frontend build, as run in CI:
 ```bash
 uv run pytest -q
 uvx ruff check . && uvx ruff format --check .
-cd frontend && npm ci && npm run build
+cd frontend && npm ci && npm test && npm run build
 ```
 
 Configuration is read from environment variables or `.env`; [.env.example](.env.example) lists all of them.
