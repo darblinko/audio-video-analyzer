@@ -1,274 +1,146 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import React, { useEffect, useRef, useState } from 'react';
+import { uploadRecording } from './api';
+import { blobToWav } from './wav';
 
-function MediaCapture({ onUploadComplete }) {
-  const [mediaType, setMediaType] = useState('audio'); // 'audio' or 'video'
+const MIME_CANDIDATES = {
+  audio: ['audio/webm;codecs=opus', 'audio/mp4'],
+  video: ['video/webm;codecs=vp8,opus', 'video/mp4'],
+};
+
+function pickMimeType(mediaType) {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+  return MIME_CANDIDATES[mediaType].find((type) => MediaRecorder.isTypeSupported(type)) || '';
+}
+
+function videoFileName(mimeType) {
+  return `recording_${Date.now()}.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+}
+
+function MediaCapture({ onUploadComplete, onError }) {
+  const [mediaType, setMediaType] = useState('audio');
   const [isRecording, setIsRecording] = useState(false);
-  const [mediaStream, setMediaStream] = useState(null);
-  const [recordedBlob, setRecordedBlob] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(null);
-  
-  const mediaRecorderRef = useRef(null);
+  const [recording, setRecording] = useState(null);
+  const [busyMessage, setBusyMessage] = useState(null);
+
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
   const videoRef = useRef(null);
   const chunksRef = useRef([]);
-  const ffmpegRef = useRef(new FFmpeg());
 
-  // Load FFmpeg.wasm
-  useEffect(() => {
-    loadFFmpeg();
-  }, []);
-
-  const loadFFmpeg = async () => {
-    try {
-      const ffmpeg = ffmpegRef.current;
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
-      
-      setFfmpegLoaded(true);
-      console.log('FFmpeg loaded successfully');
-    } catch (error) {
-      console.error('Failed to load FFmpeg:', error);
-      alert('Failed to load FFmpeg. Audio extraction from video will not work.');
-    }
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
   };
+
+  useEffect(() => stopStream, []);
 
   const startRecording = async () => {
     try {
-      const constraints = {
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: mediaType === 'video' ? { facingMode: 'user' } : false
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      setMediaStream(stream);
-
-      // Show video preview
+        video: mediaType === 'video' ? { facingMode: 'user' } : false,
+      });
+      streamRef.current = stream;
       if (mediaType === 'video' && videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
       }
-
-      // Setup MediaRecorder
-      const options = { mimeType: 'video/webm;codecs=vp8,opus' };
-      let mediaRecorder;
-      
-      try {
-        mediaRecorder = new MediaRecorder(stream, options);
-      } catch (e) {
-        // Fallback for browsers that don't support webm
-        mediaRecorder = new MediaRecorder(stream);
-      }
-
+      const mimeType = pickMimeType(mediaType);
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
       };
-
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
-        setRecordedBlob(blob);
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
-        setMediaStream(null);
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = null;
-        }
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
+        setRecording({ blob, mediaType, mimeType: recorder.mimeType });
+        stopStream();
       };
-
-      mediaRecorder.start();
-      mediaRecorderRef.current = mediaRecorder;
+      recorder.start();
+      recorderRef.current = recorder;
       setIsRecording(true);
     } catch (error) {
-      console.error('Error starting recording:', error);
-      alert('Failed to access microphone/camera. Please grant permissions.');
+      stopStream();
+      onError(`Microphone or camera unavailable: ${error.message}`);
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+    if (recorderRef.current && isRecording) {
+      recorderRef.current.stop();
       setIsRecording(false);
     }
   };
 
-  const extractAudioFromVideo = async (videoBlob) => {
-    if (!ffmpegLoaded) {
-      console.log('FFmpeg not loaded, skipping audio extraction');
-      return videoBlob;
-    }
-
+  const upload = async () => {
+    if (!recording) return;
     try {
-      setIsProcessing(true);
-      const ffmpeg = ffmpegRef.current;
-
-      // Write video to FFmpeg filesystem
-      await ffmpeg.writeFile('input.webm', await fetchFile(videoBlob));
-
-      // Extract audio
-      await ffmpeg.exec(['-i', 'input.webm', '-vn', '-acodec', 'libmp3lame', 'output.mp3']);
-
-      // Read extracted audio
-      const data = await ffmpeg.readFile('output.mp3');
-      const audioBlob = new Blob([data.buffer], { type: 'audio/mp3' });
-
-      setIsProcessing(false);
-      return audioBlob;
-    } catch (error) {
-      console.error('Audio extraction failed:', error);
-      setIsProcessing(false);
-      // Return original video if extraction fails
-      return videoBlob;
-    }
-  };
-
-  const uploadMedia = async () => {
-    if (!recordedBlob) return;
-
-    try {
-      setIsProcessing(true);
-      setUploadProgress('Preparing file...');
-
-      let uploadBlob = recordedBlob;
-      let uploadMediaType = mediaType;
-
-      // If video, extract audio first
-      if (mediaType === 'video' && ffmpegLoaded) {
-        setUploadProgress('Extracting audio from video...');
-        uploadBlob = await extractAudioFromVideo(recordedBlob);
-        uploadMediaType = 'audio';
-      }
-
-      // Upload to server
-      setUploadProgress('Uploading to server...');
-      const formData = new FormData();
-      const filename = `recording_${Date.now()}.${mediaType === 'video' ? 'webm' : 'mp3'}`;
-      formData.append('file', uploadBlob, filename);
-      formData.append('media_type', uploadMediaType);
-
-      const response = await fetch('http://localhost:8000/api/upload', {
-        method: 'POST',
-        body: formData,
+      setBusyMessage('Converting the audio track to WAV');
+      const audioWav = await blobToWav(recording.blob);
+      setBusyMessage('Uploading');
+      const isVideo = recording.mediaType === 'video';
+      const result = await uploadRecording({
+        audioWav,
+        videoBlob: isVideo ? recording.blob : null,
+        videoName: isVideo ? videoFileName(recording.mimeType) : null,
       });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setUploadProgress('Analysis started!');
-        onUploadComplete(result.analysis_id);
-        
-        // Clear recorded blob after successful upload
-        setTimeout(() => {
-          setRecordedBlob(null);
-          setUploadProgress(null);
-        }, 2000);
-      } else {
-        throw new Error(result.message || 'Upload failed');
-      }
+      onUploadComplete(result.analysis_id);
+      setRecording(null);
     } catch (error) {
-      console.error('Upload failed:', error);
-      alert(`Upload failed: ${error.message}`);
-      setUploadProgress(null);
+      onError(`Upload failed: ${error.message}`);
     } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const resetRecording = () => {
-    setRecordedBlob(null);
-    setUploadProgress(null);
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      setMediaStream(null);
+      setBusyMessage(null);
     }
   };
 
   return (
     <div className="media-capture">
-      <h2>📹 Capture Media</h2>
-      
+      <h2>Record</h2>
       <div className="media-type-selector">
-        <button
-          className={`type-btn ${mediaType === 'audio' ? 'active' : ''}`}
-          onClick={() => setMediaType('audio')}
-          disabled={isRecording}
-        >
-          🎙️ Audio Only
-        </button>
-        <button
-          className={`type-btn ${mediaType === 'video' ? 'active' : ''}`}
-          onClick={() => setMediaType('video')}
-          disabled={isRecording}
-        >
-          🎥 Video
-        </button>
+        {['audio', 'video'].map((type) => (
+          <button
+            key={type}
+            className={`type-btn ${mediaType === type ? 'active' : ''}`}
+            onClick={() => setMediaType(type)}
+            disabled={isRecording || Boolean(busyMessage)}
+          >
+            {type === 'audio' ? 'Audio only' : 'Video and audio'}
+          </button>
+        ))}
       </div>
 
       {mediaType === 'video' && (
         <div className="video-preview">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{ width: '100%', maxWidth: '500px', borderRadius: '8px' }}
-          />
+          <video ref={videoRef} autoPlay playsInline muted />
         </div>
       )}
 
       <div className="recording-controls">
-        {!isRecording && !recordedBlob && (
-          <button className="btn btn-primary" onClick={startRecording}>
-            ⏺️ Start Recording
-          </button>
+        {!isRecording && !recording && !busyMessage && (
+          <button className="btn btn-primary" onClick={startRecording}>Start recording</button>
         )}
-
         {isRecording && (
-          <button className="btn btn-danger" onClick={stopRecording}>
-            ⏹️ Stop Recording
-          </button>
+          <button className="btn btn-danger" onClick={stopRecording}>Stop recording</button>
         )}
-
-        {recordedBlob && !isProcessing && (
+        {recording && !busyMessage && (
           <div className="recorded-actions">
-            <button className="btn btn-success" onClick={uploadMedia}>
-              ⬆️ Upload & Analyze
-            </button>
-            <button className="btn btn-secondary" onClick={resetRecording}>
-              🔄 Record Again
-            </button>
+            <button className="btn btn-success" onClick={upload}>Upload and analyze</button>
+            <button className="btn btn-secondary" onClick={() => setRecording(null)}>Discard</button>
           </div>
         )}
-
-        {isProcessing && (
+        {busyMessage && (
           <div className="processing-status">
             <div className="spinner"></div>
-            <p>{uploadProgress || 'Processing...'}</p>
+            <p>{busyMessage}</p>
           </div>
         )}
       </div>
 
-      <div className="info-section">
-        <p className="info-text">
-          {mediaType === 'audio' 
-            ? '🎤 Click "Start Recording" to capture audio from your microphone'
-            : '📹 Click "Start Recording" to capture video with audio from your camera'}
-        </p>
-        {!ffmpegLoaded && mediaType === 'video' && (
-          <p className="warning-text">⚠️ FFmpeg loading... Audio extraction may not work yet.</p>
-        )}
-      </div>
+      <p className="info-text">
+        {mediaType === 'audio'
+          ? 'Records the microphone. The audio is analyzed on this machine.'
+          : 'Records the front camera and microphone. With GOOGLE_API_KEY set, the video is uploaded to the Google Gemini API.'}
+      </p>
     </div>
   );
 }
