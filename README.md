@@ -284,7 +284,7 @@ uvx ruff check . && uvx ruff format --check .
 cd frontend && npm ci && npm test && npm run build
 ```
 
-Configuration is read from environment variables or `.env`; [.env.example](.env.example) is the template. Two limits are not in the template: `AVA_MAX_AUDIO_SECONDS` (default 300) rejects longer clips before they are decoded, and `AVA_MAX_CONCURRENT_ANALYSES` (default 2) caps how many feature extractions run at once. [config.py](src/av_analyzer/config.py) defines every setting.
+Configuration is read from environment variables or `.env`; [.env.example](.env.example) is the template. `AVA_MAX_AUDIO_SECONDS` (default 300) rejects longer clips before they are decoded, and `AVA_MAX_CONCURRENT_ANALYSES` (default 2) caps how many feature extractions run at once. [config.py](src/av_analyzer/config.py) defines every setting.
 
 ## Project layout
 
