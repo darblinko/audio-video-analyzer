@@ -16,10 +16,32 @@ class AudioDecodeError(ValueError):
     """The file could not be decoded as audio."""
 
 
-def load_audio(path: str | Path, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
-    """Decode a file to mono float32 at sample_rate. WAV, FLAC and OGG need no ffmpeg."""
+def _check_duration(path: str | Path, max_seconds: float) -> None:
+    """Reject a clip whose header reports more than max_seconds, before decoding it."""
     try:
-        samples, _ = librosa.load(str(path), sr=sample_rate, mono=True)
+        duration = librosa.get_duration(path=str(path))
+    except Exception:
+        # librosa.load below reports undecodable files; its duration cap still applies.
+        return
+    if duration > max_seconds:
+        raise AudioDecodeError(
+            f"{Path(path).name} is {duration:.0f} s long; "
+            f"AVA_MAX_AUDIO_SECONDS allows {max_seconds:.0f} s"
+        )
+
+
+def load_audio(
+    path: str | Path, sample_rate: int = SAMPLE_RATE, max_seconds: float | None = None
+) -> np.ndarray:
+    """Decode a file to mono float32 at sample_rate. WAV, FLAC and OGG need no ffmpeg.
+
+    With max_seconds set, a longer clip is rejected from its header and decoding never reads
+    more than max_seconds of audio, so memory use is bounded even when the header is wrong.
+    """
+    if max_seconds is not None:
+        _check_duration(path, max_seconds)
+    try:
+        samples, _ = librosa.load(str(path), sr=sample_rate, mono=True, duration=max_seconds)
     except Exception as exc:
         raise AudioDecodeError(f"cannot decode {Path(path).name}") from exc
     if samples.size == 0:
@@ -27,8 +49,10 @@ def load_audio(path: str | Path, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
     return samples
 
 
-def analyze_file(path: str | Path, sample_rate: int = SAMPLE_RATE) -> dict[str, Any]:
-    return extract_features(load_audio(path, sample_rate), sample_rate)
+def analyze_file(
+    path: str | Path, sample_rate: int = SAMPLE_RATE, max_seconds: float | None = None
+) -> dict[str, Any]:
+    return extract_features(load_audio(path, sample_rate, max_seconds), sample_rate)
 
 
 def _downsample(values: np.ndarray, points: int) -> list[float]:

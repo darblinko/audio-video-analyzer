@@ -26,6 +26,8 @@ class Settings:
     google_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
     gemini_timeout_s: float = 120.0
+    max_audio_seconds: float = 300.0
+    max_concurrent_analyses: int = 2
     cors_origins: tuple[str, ...] = field(default=DEFAULT_CORS_ORIGINS)
 
     @property
@@ -42,6 +44,12 @@ class Settings:
         max_mb = float(env.get("AVA_MAX_UPLOAD_MB", "50"))
         if max_mb <= 0:
             raise ValueError("AVA_MAX_UPLOAD_MB must be positive")
+        max_audio_seconds = float(env.get("AVA_MAX_AUDIO_SECONDS", "300"))
+        max_concurrent = int(env.get("AVA_MAX_CONCURRENT_ANALYSES", "2"))
+        if max_audio_seconds <= 0 or max_concurrent <= 0:
+            raise ValueError(
+                "AVA_MAX_AUDIO_SECONDS and AVA_MAX_CONCURRENT_ANALYSES must be positive"
+            )
         return cls(
             data_dir=Path(env.get("AVA_DATA_DIR", "data")),
             max_upload_bytes=int(max_mb * 1024 * 1024),
@@ -49,5 +57,7 @@ class Settings:
             google_api_key=env.get("GOOGLE_API_KEY", "").strip(),
             gemini_model=env.get("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL,
             gemini_timeout_s=float(env.get("GEMINI_TIMEOUT_S", "120")),
+            max_audio_seconds=max_audio_seconds,
+            max_concurrent_analyses=max_concurrent,
             cors_origins=_origins(env.get("AVA_CORS_ORIGINS")),
         )

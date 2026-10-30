@@ -72,6 +72,11 @@ class AppState:
     describer: VideoDescriber | None
     samples_dir: Path
     manager: ConnectionManager = field(default_factory=ConnectionManager)
+    analysis_slots: asyncio.Semaphore = field(init=False)
+
+    def __post_init__(self) -> None:
+        # Each decoded clip and its spectrograms are held in memory; cap how many run at once.
+        self.analysis_slots = asyncio.Semaphore(self.settings.max_concurrent_analyses)
 
     def gemini_status(self) -> dict[str, Any]:
         if self.describer is None:
@@ -188,7 +193,10 @@ async def run_analysis(
             }
         )
         try:
-            features = await asyncio.to_thread(analyze_file, audio_path)
+            async with state.analysis_slots:
+                features = await asyncio.to_thread(
+                    analyze_file, audio_path, max_seconds=state.settings.max_audio_seconds
+                )
         except AudioDecodeError as exc:
             await _fail(state, analysis_id, f"Audio analysis failed: {exc}")
             return
